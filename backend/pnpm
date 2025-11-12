@@ -1,0 +1,2 @@
+#!/bin/bash
+npx pnpm@10.14.0 "$@"

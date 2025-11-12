@@ -1,7 +1,7 @@
 import prisma from '../client.ts';
 import { Prisma, Role, User } from '../generated/prisma/index.js';
 import ApiError from '../utils/ApiError.ts';
-import { encryptPassword } from '../utils/encryption.ts';
+import { encryptPassword, isPasswordMatch } from '../utils/encryption.ts';
 import httpStatus from 'http-status';
 
 /**
@@ -40,20 +40,39 @@ const queryUsers = async <Key extends keyof User>(
         sortBy?: string;
         sortType?: 'asc' | 'desc';
     },
-    keys: Key[] = ['id', 'email', 'name', 'password', 'role', 'isEmailVerified', 'createdAt', 'updatedAt'] as Key[]
-): Promise<Pick<User, Key>[]> => {
+    keys: Key[] = ['id', 'email', 'name', 'role', 'isEmailVerified', 'createdAt', 'updatedAt'] as Key[]
+): Promise<{
+    results: Pick<User, Key>[];
+    page: number;
+    limit: number;
+    totalPages: number;
+    totalResults: number;
+}> => {
     const page = options.page ?? 1;
     const limit = options.limit ?? 10;
     const sortBy = options.sortBy;
     const sortType = options.sortType ?? 'desc';
-    const users = await prisma.user.findMany({
-        where: filter,
-        select: keys.reduce((obj, k) => ({ ...obj, [k]: true }), {}),
-        skip: page * limit,
-        take: limit,
-        orderBy: sortBy ? { [sortBy]: sortType } : undefined
-    });
-    return users as Pick<User, Key>[];
+    
+    const [users, totalResults] = await Promise.all([
+        prisma.user.findMany({
+            where: filter,
+            select: keys.reduce((obj, k) => ({ ...obj, [k]: true }), {}),
+            skip: (page - 1) * limit,
+            take: limit,
+            orderBy: sortBy ? { [sortBy]: sortType } : undefined
+        }),
+        prisma.user.count({ where: filter })
+    ]);
+    
+    const totalPages = Math.ceil(totalResults / limit);
+    
+    return {
+        results: users as Pick<User, Key>[],
+        page,
+        limit,
+        totalPages,
+        totalResults
+    };
 };
 
 /**
@@ -97,15 +116,21 @@ const getUserByEmail = async <Key extends keyof User>(
 const updateUserById = async <Key extends keyof User>(
     userId: number,
     updateBody: Prisma.UserUpdateInput,
-    keys: Key[] = ['id', 'email', 'name', 'role'] as Key[]
+    keys: Key[] = ['id', 'email', 'name', 'role', 'isEmailVerified', 'createdAt', 'updatedAt'] as Key[]
 ): Promise<Pick<User, Key> | null> => {
     const user = await getUserById(userId, ['id', 'email', 'name']);
     if (!user) {
         throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
     }
-    if (updateBody.email && (await getUserByEmail(updateBody.email as string))) {
+    if (updateBody.email && updateBody.email !== user.email && (await getUserByEmail(updateBody.email as string))) {
         throw new ApiError(httpStatus.BAD_REQUEST, 'Email already taken');
     }
+    
+    // If email is being updated, reset email verification status
+    if (updateBody.email && updateBody.email !== user.email) {
+        updateBody.isEmailVerified = false;
+    }
+    
     const updatedUser = await prisma.user.update({
         where: { id: user.id },
         data: updateBody,
@@ -128,11 +153,36 @@ const deleteUserById = async (userId: number): Promise<User> => {
     return user;
 };
 
+/**
+ * Change user password
+ * @param {number} userId
+ * @param {string} currentPassword
+ * @param {string} newPassword
+ * @returns {Promise<void>}
+ */
+const changeUserPassword = async (userId: number, currentPassword: string, newPassword: string): Promise<void> => {
+    const user = await getUserById(userId, ['id', 'password']);
+    if (!user) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
+    }
+    
+    if (!(await isPasswordMatch(currentPassword, user.password as string))) {
+        throw new ApiError(httpStatus.UNAUTHORIZED, 'Invalid current password');
+    }
+    
+    const encryptedNewPassword = await encryptPassword(newPassword);
+    await prisma.user.update({
+        where: { id: userId },
+        data: { password: encryptedNewPassword }
+    });
+};
+
 export default {
     createUser,
     queryUsers,
     getUserById,
     getUserByEmail,
     updateUserById,
-    deleteUserById
+    deleteUserById,
+    changeUserPassword
 };

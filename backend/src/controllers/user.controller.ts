@@ -1,14 +1,17 @@
+import { User } from '../generated/prisma/index.js';
 import { userService } from '../services/index.ts';
 import ApiError from '../utils/ApiError.ts';
 import catchAsync from '../utils/catchAsync.ts';
 import catchAsyncWithAuth from '../utils/catchAsyncWithAuth.ts';
+import exclude from '../utils/exclude.ts';
 import pick from '../utils/pick.ts';
 import httpStatus from 'http-status';
 
 const createUser = catchAsync(async (req, res) => {
     const { email, password, name, role } = req.body;
     const user = await userService.createUser(email, password, name, role);
-    res.status(httpStatus.CREATED).send(user);
+    const userWithoutPassword = exclude(user, ['password']);
+    res.status(httpStatus.CREATED).send(userWithoutPassword);
 });
 
 const getUsers = catchAsyncWithAuth(async (req, res) => {
@@ -19,21 +22,58 @@ const getUsers = catchAsyncWithAuth(async (req, res) => {
 });
 
 const getUser = catchAsync(async (req, res) => {
-    const user = await userService.getUserById(req.params.userId);
+    const user = await userService.getUserById(parseInt(req.params.userId));
     if (!user) {
         throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
     }
-    res.send(user);
+    const userWithoutPassword = exclude(user, ['password']);
+    res.send(userWithoutPassword);
 });
 
 const updateUser = catchAsync(async (req, res) => {
-    const user = await userService.updateUserById(req.params.userId, req.body);
-    res.send(user);
+    const user = await userService.updateUserById(parseInt(req.params.userId), req.body);
+    if (!user) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
+    }
+    const userWithoutPassword = exclude(user, ['password']);
+    res.send(userWithoutPassword);
 });
 
 const deleteUser = catchAsync(async (req, res) => {
-    await userService.deleteUserById(req.params.userId);
-    res.status(httpStatus.NO_CONTENT).send();
+    await userService.deleteUserById(parseInt(req.params.userId));
+    res.send({});
+});
+
+const getProfile = catchAsyncWithAuth(async (req, res) => {
+    const user = req.user as User;
+    const userProfile = await userService.getUserById(user.id);
+    if (!userProfile) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
+    }
+    const userWithoutPassword = exclude(userProfile, ['password']);
+    res.send(userWithoutPassword);
+});
+
+const updateProfile = catchAsyncWithAuth(async (req, res) => {
+    const user = req.user as User;
+    const updatedUser = await userService.updateUserById(user.id, req.body);
+    if (!updatedUser) {
+        throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
+    }
+    const userWithoutPassword = exclude(updatedUser, ['password']);
+    res.send(userWithoutPassword);
+});
+
+const changePassword = catchAsyncWithAuth(async (req, res) => {
+    const user = req.user as User;
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    
+    if (newPassword !== confirmPassword) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'New password and confirm password do not match');
+    }
+    
+    await userService.changeUserPassword(user.id, currentPassword, newPassword);
+    res.send({});
 });
 
 export default {
@@ -41,5 +81,8 @@ export default {
     getUsers,
     getUser,
     updateUser,
-    deleteUser
+    deleteUser,
+    getProfile,
+    updateProfile,
+    changePassword
 };

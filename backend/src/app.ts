@@ -5,6 +5,8 @@ import { errorConverter, errorHandler } from './middlewares/error.ts';
 import { authLimiter } from './middlewares/rateLimiter.ts';
 import xss from './middlewares/xss.ts';
 import routes from './routes/v1/index.ts';
+import profileRoute from './routes/v1/profile.route.ts';
+import dashboardRoute from './routes/v1/dashboard.route.ts';
 import ApiError from './utils/ApiError.ts';
 import compression from 'compression';
 import cors from 'cors';
@@ -58,6 +60,10 @@ app.get('/api/v1/health', (req, res) => {
 
 // v1 api routes
 app.use('/api/v1', routes);
+
+// Profile and dashboard routes (not versioned)
+app.use('/profile', profileRoute);
+app.use('/dashboard', dashboardRoute);
 
 // send back a 404 error for any unknown api request
 app.use((req, res, next) => {

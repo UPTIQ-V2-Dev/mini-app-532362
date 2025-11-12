@@ -106,8 +106,6 @@ const verifyEmail = async (verifyEmailToken: string): Promise<void> => {
 
 export default {
     loginUserWithEmailAndPassword,
-    isPasswordMatch,
-    encryptPassword,
     logout,
     refreshAuth,
     resetPassword,
